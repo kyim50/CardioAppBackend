@@ -36,7 +36,7 @@ app.post('/register', async (req, res) => {
       [fullName, email, hash]
     );
 
-    const userId = result.insertId.toString();  // Stable string ID
+    const userId = result.insertId.toString();
     res.json({ success: true, message: "Registered successfully", userId });
   } catch (err) {
     console.error(err);
@@ -57,7 +57,7 @@ app.post('/login', async (req, res) => {
     const match = await bcrypt.compare(password, user.password_hash);
     if (!match) return res.json({ success: false, message: 'Incorrect password' });
 
-    const userId = user.id.toString(); // Stable string ID
+    const userId = user.id.toString();
     res.json({ success: true, message: "Login successful", userId });
   } catch (err) {
     console.error(err);
@@ -85,7 +85,8 @@ async function saveHeartData(userId, deviceName, data) {
     const { currentHeartRate = 0, restingHeartRate = 0, hrv = 0 } = data;
     await conn.execute(
       `INSERT INTO heart_data (user_id, device_name, current_heart_rate, resting_heart_rate, hrv)
-       VALUES (?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE current_heart_rate=VALUES(current_heart_rate), resting_heart_rate=VALUES(resting_heart_rate), hrv=VALUES(hrv)`,
       [userId, deviceName, currentHeartRate, restingHeartRate, hrv]
     );
   } finally {
@@ -154,7 +155,7 @@ async function saveHealthData(userId, deviceName, data) {
   try {
     const { condition = null, allergies = null, medications = null } = data;
     await conn.execute(
-      `INSERT INTO health_data (user_id, device_name, condition, allergies, medications)
+      `INSERT INTO health_data (user_id, device_name, \`condition\`, allergies, medications)
        VALUES (?, ?, ?, ?, ?)`,
       [userId, deviceName, condition, allergies, medications]
     );
