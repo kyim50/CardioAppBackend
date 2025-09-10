@@ -23,10 +23,12 @@ const pool = mysql.createPool({
 app.post('/register', async (req, res) => {
   try {
     const { fullName, email, password } = req.body;
-    if (!fullName || !email || !password) return res.json({ success: false, message: 'Missing fields' });
+    if (!fullName || !email || !password) 
+        return res.json({ success: false, message: 'Missing fields' });
 
     const [existing] = await pool.execute('SELECT id FROM users WHERE email = ?', [email]);
-    if (existing.length > 0) return res.json({ success: false, message: 'Email already registered' });
+    if (existing.length > 0) 
+        return res.json({ success: false, message: 'Email already registered', userId: existing[0].id.toString() });
 
     const hash = await bcrypt.hash(password, 10);
     const [result] = await pool.execute(
@@ -34,7 +36,7 @@ app.post('/register', async (req, res) => {
       [fullName, email, hash]
     );
 
-    const userId = result.insertId; // numeric ID
+    const userId = result.insertId.toString();  // Stable string ID
     res.json({ success: true, message: "Registered successfully", userId });
   } catch (err) {
     console.error(err);
@@ -45,7 +47,8 @@ app.post('/register', async (req, res) => {
 app.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    if (!email || !password) return res.json({ success: false, message: 'Missing fields' });
+    if (!email || !password) 
+        return res.json({ success: false, message: 'Missing fields' });
 
     const [rows] = await pool.execute('SELECT * FROM users WHERE email = ?', [email]);
     if (rows.length === 0) return res.json({ success: false, message: 'User not found' });
@@ -54,7 +57,7 @@ app.post('/login', async (req, res) => {
     const match = await bcrypt.compare(password, user.password_hash);
     if (!match) return res.json({ success: false, message: 'Incorrect password' });
 
-    const userId = user.id; // numeric ID
+    const userId = user.id.toString(); // Stable string ID
     res.json({ success: true, message: "Login successful", userId });
   } catch (err) {
     console.error(err);
@@ -79,7 +82,7 @@ async function saveRawData(userId, deviceName, endpoint, data, dayLabel = null) 
 async function saveHeartData(userId, deviceName, data) {
   const conn = await pool.getConnection();
   try {
-    const { currentHeartRate = null, restingHeartRate = null, hrv = null } = data;
+    const { currentHeartRate = 0, restingHeartRate = 0, hrv = 0 } = data;
     await conn.execute(
       `INSERT INTO heart_data (user_id, device_name, current_heart_rate, resting_heart_rate, hrv)
        VALUES (?, ?, ?, ?, ?)`,
@@ -93,12 +96,11 @@ async function saveHeartData(userId, deviceName, data) {
 async function saveSleepData(userId, deviceName, data) {
   const conn = await pool.getConnection();
   try {
-    const { totalSleep = null, deepSleep = null, remSleep = null, sleepHours = null } = data;
-    const hours = sleepHours ?? totalSleep; // fallback
+    const { totalSleep = 0, deepSleep = 0, remSleep = 0, sleepHours = 0 } = data;
     await conn.execute(
-      `INSERT INTO sleep_data (user_id, device_name, total_sleep, deep_sleep, rem_sleep)
-       VALUES (?, ?, ?, ?, ?)`,
-      [userId, deviceName, hours, deepSleep, remSleep]
+      `INSERT INTO sleep_data (user_id, device_name, total_sleep, deep_sleep, rem_sleep, sleep_hours)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [userId, deviceName, totalSleep, deepSleep, remSleep, sleepHours]
     );
   } finally {
     conn.release();
@@ -108,11 +110,11 @@ async function saveSleepData(userId, deviceName, data) {
 async function saveActivityData(userId, deviceName, data) {
   const conn = await pool.getConnection();
   try {
-    const { steps = null, activeCalories = null, distanceWalkingRunningKm = null } = data;
+    const { steps = 0, calories = 0, distance = 0, exerciseMinutes = 0 } = data;
     await conn.execute(
-      `INSERT INTO activity_data (user_id, device_name, steps, calories, distance)
-       VALUES (?, ?, ?, ?, ?)`,
-      [userId, deviceName, steps, activeCalories, distanceWalkingRunningKm]
+      `INSERT INTO activity_data (user_id, device_name, steps, calories, distance, exercise_minutes)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [userId, deviceName, steps, calories, distance, exerciseMinutes]
     );
   } finally {
     conn.release();
@@ -122,11 +124,11 @@ async function saveActivityData(userId, deviceName, data) {
 async function saveBodyData(userId, deviceName, data) {
   const conn = await pool.getConnection();
   try {
-    const { weightKg = null, bmi = null, bodyFatPct = null, leanMassKg = null, vo2Max = null } = data;
+    const { weight = 0, bmi = 0, bodyFat = 0, leanMass = 0, vo2Max = 0 } = data;
     await conn.execute(
       `INSERT INTO body_data (user_id, device_name, weight, bmi, body_fat, lean_mass, vo2_max)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [userId, deviceName, weightKg, bmi, bodyFatPct, leanMassKg, vo2Max]
+      [userId, deviceName, weight, bmi, bodyFat, leanMass, vo2Max]
     );
   } finally {
     conn.release();
@@ -136,11 +138,11 @@ async function saveBodyData(userId, deviceName, data) {
 async function saveVitalsData(userId, deviceName, data) {
   const conn = await pool.getConnection();
   try {
-    const { bloodPressureSystolic = null, bloodPressureDiastolic = null, oxygenSaturation = null, temperature = null } = data;
+    const { bloodPressureSystolic = 0, bloodPressureDiastolic = 0, spo2 = 0, temperature = 0 } = data;
     await conn.execute(
       `INSERT INTO vitals_data (user_id, device_name, bp_systolic, bp_diastolic, spo2, temperature)
        VALUES (?, ?, ?, ?, ?, ?)`,
-      [userId, deviceName, bloodPressureSystolic, bloodPressureDiastolic, oxygenSaturation, temperature]
+      [userId, deviceName, bloodPressureSystolic, bloodPressureDiastolic, spo2, temperature]
     );
   } finally {
     conn.release();
@@ -164,11 +166,11 @@ async function saveHealthData(userId, deviceName, data) {
 async function saveHealthHistoryData(userId, deviceName, data) {
   const conn = await pool.getConnection();
   try {
-    const { pastConditions = null, surgeries = null, familyHistory = null } = data;
+    const { pastConditions = null, surgeries = null, familyHistory = null, history = null } = data;
     await conn.execute(
-      `INSERT INTO health_history_data (user_id, device_name, past_conditions, surgeries, family_history)
-       VALUES (?, ?, ?, ?, ?)`,
-      [userId, deviceName, pastConditions, surgeries, familyHistory]
+      `INSERT INTO health_history_data (user_id, device_name, past_conditions, surgeries, family_history, history)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [userId, deviceName, pastConditions, surgeries, familyHistory, JSON.stringify(history)]
     );
   } finally {
     conn.release();
@@ -180,9 +182,8 @@ const endpoints = ['activity', 'heart', 'sleep', 'body', 'vitals', 'health', 'he
 
 endpoints.forEach(ep => {
   app.post(`/${ep}`, async (req, res) => {
-    const conn = await pool.getConnection();
     try {
-      const userId = req.body.userId || null; // numeric ID
+      const userId = req.body.userId?.toString() || null;
       const deviceName = req.body.deviceName || 'UnknownDevice';
       const data = req.body.data || req.body;
       const dayLabel = req.body.day || null;
@@ -199,10 +200,8 @@ endpoints.forEach(ep => {
 
       res.json({ success: true, endpoint: ep });
     } catch (err) {
-      console.error(err);
+      console.error('Error in', ep, err);
       res.status(500).json({ success: false, error: err.message });
-    } finally {
-      conn.release();
     }
   });
 });
