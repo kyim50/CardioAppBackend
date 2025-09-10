@@ -1,6 +1,7 @@
-require('dotenv').config(); // Load .env at the very top
+require('dotenv').config();
 const express = require('express');
 const mysql = require('mysql2/promise');
+const authRouter = require('./auth'); // your auth.js file
 
 const app = express();
 app.use(express.json());
@@ -34,7 +35,6 @@ async function saveRawData(userId, deviceName, endpoint, data, dayLabel = null) 
     }
 }
 
-// Heart
 async function saveHeartData(userId, deviceName, data) {
     const conn = await pool.getConnection();
     try {
@@ -49,7 +49,6 @@ async function saveHeartData(userId, deviceName, data) {
     }
 }
 
-// Sleep
 async function saveSleepData(userId, deviceName, data) {
     const conn = await pool.getConnection();
     try {
@@ -64,7 +63,6 @@ async function saveSleepData(userId, deviceName, data) {
     }
 }
 
-// Activity
 async function saveActivityData(userId, deviceName, data) {
     const conn = await pool.getConnection();
     try {
@@ -79,7 +77,6 @@ async function saveActivityData(userId, deviceName, data) {
     }
 }
 
-// Body
 async function saveBodyData(userId, deviceName, data) {
     const conn = await pool.getConnection();
     try {
@@ -94,7 +91,6 @@ async function saveBodyData(userId, deviceName, data) {
     }
 }
 
-// Vitals
 async function saveVitalsData(userId, deviceName, data) {
     const conn = await pool.getConnection();
     try {
@@ -109,7 +105,6 @@ async function saveVitalsData(userId, deviceName, data) {
     }
 }
 
-// Health
 async function saveHealthData(userId, deviceName, data) {
     const conn = await pool.getConnection();
     try {
@@ -124,7 +119,6 @@ async function saveHealthData(userId, deviceName, data) {
     }
 }
 
-// Health History
 async function saveHealthHistoryData(userId, deviceName, data) {
     const conn = await pool.getConnection();
     try {
@@ -140,7 +134,6 @@ async function saveHealthHistoryData(userId, deviceName, data) {
 }
 
 // ----------------- ENDPOINTS -----------------
-
 const endpoints = ['activity', 'heart', 'sleep', 'body', 'vitals', 'health', 'health_history'];
 
 endpoints.forEach(ep => {
@@ -154,13 +147,15 @@ endpoints.forEach(ep => {
 
             await saveRawData(userId, deviceName, ep, data, dayLabel);
 
-            if (ep === 'heart') await saveHeartData(userId, deviceName, data);
-            else if (ep === 'sleep') await saveSleepData(userId, deviceName, data);
-            else if (ep === 'activity') await saveActivityData(userId, deviceName, data);
-            else if (ep === 'body') await saveBodyData(userId, deviceName, data);
-            else if (ep === 'vitals') await saveVitalsData(userId, deviceName, data);
-            else if (ep === 'health') await saveHealthData(userId, deviceName, data);
-            else if (ep === 'health_history') await saveHealthHistoryData(userId, deviceName, data);
+            switch (ep) {
+                case 'heart': await saveHeartData(userId, deviceName, data); break;
+                case 'sleep': await saveSleepData(userId, deviceName, data); break;
+                case 'activity': await saveActivityData(userId, deviceName, data); break;
+                case 'body': await saveBodyData(userId, deviceName, data); break;
+                case 'vitals': await saveVitalsData(userId, deviceName, data); break;
+                case 'health': await saveHealthData(userId, deviceName, data); break;
+                case 'health_history': await saveHealthHistoryData(userId, deviceName, data); break;
+            }
 
             res.json({ success: true, endpoint: ep });
         } catch (err) {
@@ -172,7 +167,7 @@ endpoints.forEach(ep => {
     });
 });
 
-// GET endpoint to retrieve raw logs
+// GET raw logs
 app.get('/:endpoint/:deviceName', async (req, res) => {
     try {
         const { endpoint, deviceName } = req.params;
@@ -186,6 +181,9 @@ app.get('/:endpoint/:deviceName', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+
+// ----------------- MOUNT AUTH -----------------
+app.use('/', authRouter); // /register and /login
 
 // ----------------- START SERVER -----------------
 app.listen(PORT, () => console.log(`✅ API running on port ${PORT}`));
