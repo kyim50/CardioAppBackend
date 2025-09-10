@@ -32,7 +32,7 @@ app.post('/register', async (req, res) => {
     await pool.execute('INSERT INTO users (full_name, email, password_hash) VALUES (?, ?, ?)', [fullName, email, hash]);
 
     const userId = '@' + fullName.replace(/\s+/g, '');
-    res.json({ success: true, userId });
+    res.json({ success: true, message: "Registered successfully", userId });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: 'Register failed' });
@@ -52,7 +52,7 @@ app.post('/login', async (req, res) => {
     if (!match) return res.json({ success: false, message: 'Incorrect password' });
 
     const userId = '@' + user.full_name.replace(/\s+/g, '');
-    res.json({ success: true, userId });
+    res.json({ success: true, message: "Login successful", userId });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: 'Login failed' });
@@ -219,9 +219,13 @@ app.get('/:endpoint/:deviceName', async (req, res) => {
 });
 
 // ----------------- CATCH-ALL ROUTE -----------------
-app.all('*', (req, res) => {
-  res.status(404).json({ error: 'Route not found', method: req.method, url: req.url });
+// Option 2: Express default "any path" pattern
+app.use((req, res) => {
+  res.status(404).json({ error: 'Route not found', method: req.method, url: req.originalUrl });
 });
 
+
 // ----------------- START SERVER -----------------
-app.listen(PORT, () => console.log(`✅ API running on port ${PORT}`));
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`✅ API running on port ${PORT}`);
+});
