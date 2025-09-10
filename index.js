@@ -221,6 +221,100 @@ app.get('/:endpoint/:deviceName', async (req, res) => {
   }
 });
 
+app.get('/insights/:userId', async (req, res) => {
+  const userId = req.params.userId;
+  try {
+    const tables = [
+      { name: 'activity_data', fields: ['steps', 'exercise_minutes', 'distance', 'calories'] },
+      { name: 'heart_data', fields: ['current_heart_rate', 'resting_heart_rate', 'hrv'] },
+      { name: 'sleep_data', fields: ['sleep_hours', 'total_sleep', 'deep_sleep', 'rem_sleep'] },
+      { name: 'body_data', fields: ['weight', 'bmi', 'lean_mass', 'vo2_max', 'body_fat'] },
+      { name: 'vitals_data', fields: ['bp_systolic', 'bp_diastolic', 'spo2', 'temperature'] }
+    ];
+
+    let averages = {};
+
+    for (const table of tables) {
+      const [rows] = await pool.execute(
+        `SELECT ${table.fields.map(f => `AVG(${f}) AS ${f}`).join(', ')}
+         FROM ${table.name} WHERE user_id = ?`,
+        [userId]
+      );
+
+      if (rows.length > 0) {
+        table.fields.forEach(f => {
+          const val = rows[0][f];
+          if (val !== null && val !== undefined) averages[f] = parseFloat(val);
+        });
+      }
+    }
+
+    if (Object.keys(averages).length === 0) {
+      return res.json({ success: true, message: 'No health data available for this user', averages: {}, scores: {}, summary: 'No data', trends: {} });
+    }
+
+    const benchmarks = {
+      steps: 8000,
+      resting_heart_rate: 70,
+      hrv: 50,
+      sleep_hours: 7,
+      bp_systolic: 120,
+      bp_diastolic: 80,
+      bmi: 24.9
+    };
+
+    const scores = {};
+    for (const [key, value] of Object.entries(averages)) {
+      switch (key) {
+        case 'steps': scores.steps = Math.min(100, (value / benchmarks.steps) * 100); break;
+        case 'resting_heart_rate': scores.resting_heart_rate = Math.max(0, (benchmarks.resting_heart_rate / value) * 100); break;
+        case 'hrv': scores.hrv = Math.min(100, (value / benchmarks.hrv) * 100); break;
+        case 'sleep_hours': scores.sleep = Math.min(100, (value / benchmarks.sleep_hours) * 100); break;
+        case 'bp_systolic': scores.bp_systolic = Math.max(0, (benchmarks.bp_systolic / value) * 100); break;
+        case 'bp_diastolic': scores.bp_diastolic = Math.max(0, (benchmarks.bp_diastolic / value) * 100); break;
+        case 'bmi': scores.bmi = Math.max(0, (benchmarks.bmi / value) * 100); break;
+        default: scores[key] = value;
+      }
+    }
+
+    let summary = 'No data';
+    const validScores = Object.values(scores).filter(v => typeof v === 'number');
+    if (validScores.length > 0) {
+      const avgScore = validScores.reduce((a, b) => a + b, 0) / validScores.length;
+      if (avgScore >= 80) summary = 'Healthy';
+      else if (avgScore >= 50) summary = 'Average';
+      else summary = 'Needs Improvement';
+    }
+
+    // Trend analysis
+    const trends = {};
+    for (const table of tables) {
+      const [rows] = await pool.execute(
+        `SELECT DATE(created_at) AS day, ${table.fields.map(f => `AVG(${f}) AS ${f}`).join(', ')}
+         FROM ${table.name}
+         WHERE user_id = ?
+         GROUP BY day
+         ORDER BY day ASC`,
+        [userId]
+      );
+
+      trends[table.name] = rows.map(r => {
+        const cleaned = {};
+        for (const [k, v] of Object.entries(r)) {
+          cleaned[k] = v !== null ? parseFloat(v) : undefined;
+        }
+        return cleaned;
+      });
+    }
+
+    res.json({ success: true, averages, scores, summary, trends });
+  } catch (err) {
+    console.error("Insights error:", err);
+    res.status(500).json({ success: false, message: "Failed to calculate insights" });
+  }
+});
+
+
 // ----------------- CATCH-ALL ROUTE -----------------
 app.use((req, res) => {
   res.status(404).json({ error: 'Route not found', method: req.method, url: req.originalUrl });
