@@ -220,15 +220,6 @@ app.get('/insights/:userId', async (req, res) => {
     const [sleepRows] = await pool.execute(
       `SELECT * FROM sleep_data WHERE user_id=? ORDER BY created_at DESC LIMIT 1`, [userId]
     );
-    const [bodyRows] = await pool.execute(
-      `SELECT * FROM body_data WHERE user_id=? ORDER BY created_at DESC LIMIT 1`, [userId]
-    );
-    const [vitalsRows] = await pool.execute(
-      `SELECT * FROM vitals_data WHERE user_id=? ORDER BY created_at DESC LIMIT 1`, [userId]
-    );
-    const [healthRows] = await pool.execute(
-      `SELECT * FROM health_data WHERE user_id=? ORDER BY created_at DESC LIMIT 1`, [userId]
-    );
 
     const insights = {
       activity: activityRows[0] ? {
@@ -247,32 +238,59 @@ app.get('/insights/:userId', async (req, res) => {
         deepSleep: sleepRows[0].deep_sleep,
         remSleep: sleepRows[0].rem_sleep,
         sleepHours: sleepRows[0].sleep_hours
-      } : {},
-      body: bodyRows[0] ? {
-        weight: bodyRows[0].weight,
-        bmi: bodyRows[0].bmi,
-        bodyFat: bodyRows[0].body_fat,
-        leanMass: bodyRows[0].lean_mass,
-        vo2Max: bodyRows[0].vo2_max
-      } : {},
-      vitals: vitalsRows[0] ? {
-        bloodPressureSystolic: vitalsRows[0].bp_systolic,
-        bloodPressureDiastolic: vitalsRows[0].bp_diastolic,
-        spo2: vitalsRows[0].spo2,
-        temperature: vitalsRows[0].temperature
-      } : {},
-      health: healthRows[0] ? {
-        condition: healthRows[0].condition,
-        allergies: healthRows[0].allergies,
-        medications: healthRows[0].medications
       } : {}
     };
 
+    // ----------- SMART SUMMARY + WEIGHTED SCORE -----------
     const summary = {};
-    if (insights.activity.steps) summary.averageSteps = insights.activity.steps;
-    if (insights.heart.restingHeartRate) summary.averageHR = insights.heart.restingHeartRate;
-    if (insights.sleep.sleepHours) summary.averageSleep = insights.sleep.sleepHours;
-    summary.healthScore = 50;
+    const breakdown = {};
+
+    // Activity Score (40%)
+    let stepsScore = 0;
+    if (insights.activity.steps) {
+      stepsScore = Math.min(100, (insights.activity.steps / 10000) * 100);
+      summary.averageSteps = insights.activity.steps;
+      breakdown.stepsScore = Math.round(stepsScore);
+    }
+
+    // Heart Score (30%)
+    let heartScore = 0;
+    if (insights.heart.restingHeartRate) {
+      const rhr = insights.heart.restingHeartRate;
+      if (rhr >= 50 && rhr <= 70) heartScore = 100;
+      else if (rhr > 70 && rhr <= 90) heartScore = 70;
+      else if (rhr < 50 && rhr >= 40) heartScore = 80;
+      else heartScore = 50;
+      summary.averageHR = rhr;
+      breakdown.heartScore = heartScore;
+    }
+
+    // Sleep Score (30%)
+    let sleepScore = 0;
+    if (insights.sleep.sleepHours) {
+      const hours = insights.sleep.sleepHours;
+      if (hours >= 7 && hours <= 9) sleepScore = 100;
+      else if (hours >= 6 && hours < 7) sleepScore = 80;
+      else if (hours > 9 && hours <= 10) sleepScore = 80;
+      else sleepScore = 50;
+      summary.averageSleep = hours;
+      breakdown.sleepScore = sleepScore;
+    }
+
+    // Weighted final score
+    const weights = { steps: 0.4, heart: 0.3, sleep: 0.3 };
+    const totalWeight = [
+      stepsScore ? weights.steps : 0,
+      heartScore ? weights.heart : 0,
+      sleepScore ? weights.sleep : 0
+    ].reduce((a, b) => a + b, 0);
+
+    const weightedScore = totalWeight > 0
+      ? Math.round(((stepsScore * weights.steps) + (heartScore * weights.heart) + (sleepScore * weights.sleep)) / totalWeight)
+      : 50;
+
+    summary.healthScore = weightedScore;
+    summary.breakdown = breakdown;
 
     res.json({ success: true, insights, summary });
   } catch (err) {
@@ -281,7 +299,7 @@ app.get('/insights/:userId', async (req, res) => {
   }
 });
 
-// ----------------- GET RAW DATA (NAMESPACED) -----------------
+// ----------------- GET RAW DATA -----------------
 app.get('/raw/:endpoint/:deviceName', async (req, res) => {
   try {
     const { endpoint, deviceName } = req.params;
