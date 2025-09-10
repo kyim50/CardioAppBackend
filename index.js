@@ -79,6 +79,7 @@ async function saveRawData(userId, deviceName, endpoint, data, dayLabel = null) 
   }
 }
 
+// Other save functions (heart, sleep, activity, body, vitals, health, health_history)
 async function saveHeartData(userId, deviceName, data) {
   const conn = await pool.getConnection();
   try {
@@ -221,99 +222,85 @@ app.get('/:endpoint/:deviceName', async (req, res) => {
   }
 });
 
+// ----------------- INSIGHTS -----------------
 app.get('/insights/:userId', async (req, res) => {
-  const userId = req.params.userId;
   try {
-    const tables = [
-      { name: 'activity_data', fields: ['steps', 'exercise_minutes', 'distance', 'calories'] },
-      { name: 'heart_data', fields: ['current_heart_rate', 'resting_heart_rate', 'hrv'] },
-      { name: 'sleep_data', fields: ['sleep_hours', 'total_sleep', 'deep_sleep', 'rem_sleep'] },
-      { name: 'body_data', fields: ['weight', 'bmi', 'lean_mass', 'vo2_max', 'body_fat'] },
-      { name: 'vitals_data', fields: ['bp_systolic', 'bp_diastolic', 'spo2', 'temperature'] }
-    ];
+    const userId = req.params.userId;
 
-    let averages = {};
+    // Fetch latest data per category
+    const [activityRows] = await pool.execute(
+      `SELECT * FROM activity_data WHERE user_id=? ORDER BY created_at DESC LIMIT 1`, [userId]
+    );
+    const [heartRows] = await pool.execute(
+      `SELECT * FROM heart_data WHERE user_id=? ORDER BY created_at DESC LIMIT 1`, [userId]
+    );
+    const [sleepRows] = await pool.execute(
+      `SELECT * FROM sleep_data WHERE user_id=? ORDER BY created_at DESC LIMIT 1`, [userId]
+    );
+    const [bodyRows] = await pool.execute(
+      `SELECT * FROM body_data WHERE user_id=? ORDER BY created_at DESC LIMIT 1`, [userId]
+    );
+    const [vitalsRows] = await pool.execute(
+      `SELECT * FROM vitals_data WHERE user_id=? ORDER BY created_at DESC LIMIT 1`, [userId]
+    );
+    const [healthRows] = await pool.execute(
+      `SELECT * FROM health_data WHERE user_id=? ORDER BY created_at DESC LIMIT 1`, [userId]
+    );
 
-    for (const table of tables) {
-      const [rows] = await pool.execute(
-        `SELECT ${table.fields.map(f => `AVG(${f}) AS ${f}`).join(', ')}
-         FROM ${table.name} WHERE user_id = ?`,
-        [userId]
-      );
-
-      if (rows.length > 0) {
-        table.fields.forEach(f => {
-          const val = rows[0][f];
-          if (val !== null && val !== undefined) averages[f] = parseFloat(val);
-        });
-      }
-    }
-
-    if (Object.keys(averages).length === 0) {
-      return res.json({ success: true, message: 'No health data available for this user', averages: {}, scores: {}, summary: 'No data', trends: {} });
-    }
-
-    const benchmarks = {
-      steps: 8000,
-      resting_heart_rate: 70,
-      hrv: 50,
-      sleep_hours: 7,
-      bp_systolic: 120,
-      bp_diastolic: 80,
-      bmi: 24.9
+    // Map DB columns to consistent keys, fallback to empty objects if missing
+    const insights = {
+      activity: activityRows[0] ? {
+        steps: activityRows[0].steps,
+        calories: activityRows[0].calories,
+        distance: activityRows[0].distance,
+        exerciseMinutes: activityRows[0].exercise_minutes
+      } : {},
+      heart: heartRows[0] ? {
+        currentHeartRate: heartRows[0].current_heart_rate,
+        restingHeartRate: heartRows[0].resting_heart_rate,
+        hrv: heartRows[0].hrv
+      } : {},
+      sleep: sleepRows[0] ? {
+        totalSleep: sleepRows[0].total_sleep,
+        deepSleep: sleepRows[0].deep_sleep,
+        remSleep: sleepRows[0].rem_sleep,
+        sleepHours: sleepRows[0].sleep_hours
+      } : {},
+      body: bodyRows[0] ? {
+        weight: bodyRows[0].weight,
+        bmi: bodyRows[0].bmi,
+        bodyFat: bodyRows[0].body_fat,
+        leanMass: bodyRows[0].lean_mass,
+        vo2Max: bodyRows[0].vo2_max
+      } : {},
+      vitals: vitalsRows[0] ? {
+        bloodPressureSystolic: vitalsRows[0].bp_systolic,
+        bloodPressureDiastolic: vitalsRows[0].bp_diastolic,
+        spo2: vitalsRows[0].spo2,
+        temperature: vitalsRows[0].temperature
+      } : {},
+      health: healthRows[0] ? {
+        condition: healthRows[0].condition,
+        allergies: healthRows[0].allergies,
+        medications: healthRows[0].medications
+      } : {}
     };
 
-    const scores = {};
-    for (const [key, value] of Object.entries(averages)) {
-      switch (key) {
-        case 'steps': scores.steps = Math.min(100, (value / benchmarks.steps) * 100); break;
-        case 'resting_heart_rate': scores.resting_heart_rate = Math.max(0, (benchmarks.resting_heart_rate / value) * 100); break;
-        case 'hrv': scores.hrv = Math.min(100, (value / benchmarks.hrv) * 100); break;
-        case 'sleep_hours': scores.sleep = Math.min(100, (value / benchmarks.sleep_hours) * 100); break;
-        case 'bp_systolic': scores.bp_systolic = Math.max(0, (benchmarks.bp_systolic / value) * 100); break;
-        case 'bp_diastolic': scores.bp_diastolic = Math.max(0, (benchmarks.bp_diastolic / value) * 100); break;
-        case 'bmi': scores.bmi = Math.max(0, (benchmarks.bmi / value) * 100); break;
-        default: scores[key] = value;
-      }
-    }
+    // Health summary (example ranges)
+    const summary = {};
+    if (insights.activity.steps) summary.averageSteps = insights.activity.steps;
+    if (insights.heart.restingHeartRate) summary.averageHR = insights.heart.restingHeartRate;
+    if (insights.sleep.sleepHours) summary.averageSleep = insights.sleep.sleepHours;
 
-    let summary = 'No data';
-    const validScores = Object.values(scores).filter(v => typeof v === 'number');
-    if (validScores.length > 0) {
-      const avgScore = validScores.reduce((a, b) => a + b, 0) / validScores.length;
-      if (avgScore >= 80) summary = 'Healthy';
-      else if (avgScore >= 50) summary = 'Average';
-      else summary = 'Needs Improvement';
-    }
+    // Simple health score: 0-100
+    summary.healthScore = 50; // placeholder, you can add formula comparing to healthy ranges
 
-    // Trend analysis
-    const trends = {};
-    for (const table of tables) {
-      const [rows] = await pool.execute(
-        `SELECT DATE(created_at) AS day, ${table.fields.map(f => `AVG(${f}) AS ${f}`).join(', ')}
-         FROM ${table.name}
-         WHERE user_id = ?
-         GROUP BY day
-         ORDER BY day ASC`,
-        [userId]
-      );
-
-      trends[table.name] = rows.map(r => {
-        const cleaned = {};
-        for (const [k, v] of Object.entries(r)) {
-          cleaned[k] = v !== null ? parseFloat(v) : undefined;
-        }
-        return cleaned;
-      });
-    }
-
-    res.json({ success: true, averages, scores, summary, trends });
+    res.json({ success: true, insights, summary });
   } catch (err) {
-    console.error("Insights error:", err);
-    res.status(500).json({ success: false, message: "Failed to calculate insights" });
+    console.error(err);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
-
 
 // ----------------- CATCH-ALL ROUTE -----------------
 app.use((req, res) => {
