@@ -66,137 +66,96 @@ app.post('/login', async (req, res) => {
 });
 
 // ----------------- SAVE FUNCTIONS -----------------
-
-// Generic raw device data
 async function saveRawData(userId, deviceName, endpoint, data, dayLabel = null) {
   const conn = await pool.getConnection();
   try {
     await conn.execute(
-      `INSERT INTO device_data (user_id, device_name, endpoint, data, day_label)
+      `INSERT INTO device_data (user_id, device_name, endpoint, data, day_label) 
        VALUES (?, ?, ?, ?, ?)`,
-      [userId, deviceName, JSON.stringify(data), endpoint, dayLabel]
+      [userId, deviceName, endpoint, JSON.stringify(data), dayLabel]
     );
   } finally {
     conn.release();
   }
 }
 
-// Save heart data safely
 async function saveHeartData(userId, deviceName, data) {
   const conn = await pool.getConnection();
   try {
     const { currentHeartRate = 0, restingHeartRate = 0, hrv = 0 } = data;
-    const timestamp = new Date();
     await conn.execute(
-      `INSERT INTO heart_data (user_id, device_name, current_heart_rate, resting_heart_rate, hrv, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE
-         current_heart_rate = VALUES(current_heart_rate),
-         resting_heart_rate = VALUES(resting_heart_rate),
-         hrv = VALUES(hrv)`,
-      [userId, deviceName, currentHeartRate, restingHeartRate, hrv, timestamp]
+      `INSERT INTO heart_data (user_id, device_name, current_heart_rate, resting_heart_rate, hrv)
+       VALUES (?, ?, ?, ?, ?)`,
+      [userId, deviceName, currentHeartRate, restingHeartRate, hrv]
     );
   } finally {
     conn.release();
   }
 }
 
-// Sleep data
 async function saveSleepData(userId, deviceName, data) {
   const conn = await pool.getConnection();
   try {
     const { totalSleep = 0, deepSleep = 0, remSleep = 0, sleepHours = 0 } = data;
-    const timestamp = new Date();
     await conn.execute(
-      `INSERT INTO sleep_data (user_id, device_name, total_sleep, deep_sleep, rem_sleep, sleep_hours, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE
-         total_sleep = VALUES(total_sleep),
-         deep_sleep = VALUES(deep_sleep),
-         rem_sleep = VALUES(rem_sleep),
-         sleep_hours = VALUES(sleep_hours)`,
-      [userId, deviceName, totalSleep, deepSleep, remSleep, sleepHours, timestamp]
+      `INSERT INTO sleep_data (user_id, device_name, total_sleep, deep_sleep, rem_sleep, sleep_hours)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [userId, deviceName, totalSleep, deepSleep, remSleep, sleepHours]
     );
   } finally {
     conn.release();
   }
 }
 
-// Activity data
 async function saveActivityData(userId, deviceName, data) {
   const conn = await pool.getConnection();
   try {
     const { steps = 0, calories = 0, distance = 0, exerciseMinutes = 0 } = data;
-    const timestamp = new Date();
     await conn.execute(
-      `INSERT INTO activity_data (user_id, device_name, steps, calories, distance, exercise_minutes, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE
-         steps = VALUES(steps),
-         calories = VALUES(calories),
-         distance = VALUES(distance),
-         exercise_minutes = VALUES(exercise_minutes)`,
-      [userId, deviceName, steps, calories, distance, exerciseMinutes, timestamp]
+      `INSERT INTO activity_data (user_id, device_name, steps, calories, distance, exercise_minutes)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [userId, deviceName, steps, calories, distance, exerciseMinutes]
     );
   } finally {
     conn.release();
   }
 }
 
-// Body data
 async function saveBodyData(userId, deviceName, data) {
   const conn = await pool.getConnection();
   try {
     const { weight = 0, bmi = 0, bodyFat = 0, leanMass = 0, vo2Max = 0 } = data;
-    const timestamp = new Date();
     await conn.execute(
-      `INSERT INTO body_data (user_id, device_name, weight, bmi, body_fat, lean_mass, vo2_max, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE
-         weight = VALUES(weight),
-         bmi = VALUES(bmi),
-         body_fat = VALUES(body_fat),
-         lean_mass = VALUES(lean_mass),
-         vo2_max = VALUES(vo2_max)`,
-      [userId, deviceName, weight, bmi, bodyFat, leanMass, vo2Max, timestamp]
+      `INSERT INTO body_data (user_id, device_name, weight, bmi, body_fat, lean_mass, vo2_max)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [userId, deviceName, weight, bmi, bodyFat, leanMass, vo2Max]
     );
   } finally {
     conn.release();
   }
 }
 
-// Vitals data
 async function saveVitalsData(userId, deviceName, data) {
   const conn = await pool.getConnection();
   try {
     const { bloodPressureSystolic = 0, bloodPressureDiastolic = 0, spo2 = 0, temperature = 0 } = data;
-    const timestamp = new Date();
     await conn.execute(
-      `INSERT INTO vitals_data (user_id, device_name, bp_systolic, bp_diastolic, spo2, temperature, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE
-         bp_systolic = VALUES(bp_systolic),
-         bp_diastolic = VALUES(bp_diastolic),
-         spo2 = VALUES(spo2),
-         temperature = VALUES(temperature)`,
-      [userId, deviceName, bloodPressureSystolic, bloodPressureDiastolic, spo2, temperature, timestamp]
+      `INSERT INTO vitals_data (user_id, device_name, bp_systolic, bp_diastolic, spo2, temperature)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [userId, deviceName, bloodPressureSystolic, bloodPressureDiastolic, spo2, temperature]
     );
   } finally {
     conn.release();
   }
 }
 
-// Health data
 async function saveHealthData(userId, deviceName, data) {
   const conn = await pool.getConnection();
   try {
     const { condition = null, allergies = null, medications = null } = data;
     await conn.execute(
       `INSERT INTO health_data (user_id, device_name, \`condition\`, allergies, medications)
-       VALUES (?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE
-         allergies = VALUES(allergies),
-         medications = VALUES(medications)`,
+       VALUES (?, ?, ?, ?, ?)`,
       [userId, deviceName, condition, allergies, medications]
     );
   } finally {
@@ -204,16 +163,13 @@ async function saveHealthData(userId, deviceName, data) {
   }
 }
 
-// Health history data
 async function saveHealthHistoryData(userId, deviceName, data) {
   const conn = await pool.getConnection();
   try {
     const { pastConditions = null, surgeries = null, familyHistory = null, history = null } = data;
     await conn.execute(
       `INSERT INTO health_history_data (user_id, device_name, past_conditions, surgeries, family_history, history)
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE
-         history = VALUES(history)`,
+       VALUES (?, ?, ?, ?, ?, ?)`,
       [userId, deviceName, pastConditions, surgeries, familyHistory, JSON.stringify(history)]
     );
   } finally {
@@ -221,7 +177,7 @@ async function saveHealthHistoryData(userId, deviceName, data) {
   }
 }
 
-// ----------------- ENDPOINTS -----------------
+// ----------------- HEALTH ENDPOINTS -----------------
 const endpoints = ['activity', 'heart', 'sleep', 'body', 'vitals', 'health', 'health_history'];
 
 endpoints.forEach(ep => {
