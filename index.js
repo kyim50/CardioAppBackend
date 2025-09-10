@@ -29,9 +29,12 @@ app.post('/register', async (req, res) => {
     if (existing.length > 0) return res.json({ success: false, message: 'Email already registered' });
 
     const hash = await bcrypt.hash(password, 10);
-    await pool.execute('INSERT INTO users (full_name, email, password_hash) VALUES (?, ?, ?)', [fullName, email, hash]);
+    const [result] = await pool.execute(
+      'INSERT INTO users (full_name, email, password_hash) VALUES (?, ?, ?)',
+      [fullName, email, hash]
+    );
 
-    const userId = '@' + fullName.replace(/\s+/g, '');
+    const userId = result.insertId; // numeric ID
     res.json({ success: true, message: "Registered successfully", userId });
   } catch (err) {
     console.error(err);
@@ -51,7 +54,7 @@ app.post('/login', async (req, res) => {
     const match = await bcrypt.compare(password, user.password_hash);
     if (!match) return res.json({ success: false, message: 'Incorrect password' });
 
-    const userId = '@' + user.full_name.replace(/\s+/g, '');
+    const userId = user.id; // numeric ID
     res.json({ success: true, message: "Login successful", userId });
   } catch (err) {
     console.error(err);
@@ -90,11 +93,12 @@ async function saveHeartData(userId, deviceName, data) {
 async function saveSleepData(userId, deviceName, data) {
   const conn = await pool.getConnection();
   try {
-    const { totalSleep = null, deepSleep = null, remSleep = null } = data;
+    const { totalSleep = null, deepSleep = null, remSleep = null, sleepHours = null } = data;
+    const hours = sleepHours ?? totalSleep; // fallback
     await conn.execute(
       `INSERT INTO sleep_data (user_id, device_name, total_sleep, deep_sleep, rem_sleep)
        VALUES (?, ?, ?, ?, ?)`,
-      [userId, deviceName, totalSleep, deepSleep, remSleep]
+      [userId, deviceName, hours, deepSleep, remSleep]
     );
   } finally {
     conn.release();
@@ -104,11 +108,11 @@ async function saveSleepData(userId, deviceName, data) {
 async function saveActivityData(userId, deviceName, data) {
   const conn = await pool.getConnection();
   try {
-    const { steps = null, calories = null, distance = null } = data;
+    const { steps = null, activeCalories = null, distanceWalkingRunningKm = null } = data;
     await conn.execute(
       `INSERT INTO activity_data (user_id, device_name, steps, calories, distance)
        VALUES (?, ?, ?, ?, ?)`,
-      [userId, deviceName, steps, calories, distance]
+      [userId, deviceName, steps, activeCalories, distanceWalkingRunningKm]
     );
   } finally {
     conn.release();
@@ -118,11 +122,11 @@ async function saveActivityData(userId, deviceName, data) {
 async function saveBodyData(userId, deviceName, data) {
   const conn = await pool.getConnection();
   try {
-    const { weight = null, bmi = null, bodyFat = null } = data;
+    const { weightKg = null, bmi = null, bodyFatPct = null, leanMassKg = null, vo2Max = null } = data;
     await conn.execute(
-      `INSERT INTO body_data (user_id, device_name, weight, bmi, body_fat)
-       VALUES (?, ?, ?, ?, ?)`,
-      [userId, deviceName, weight, bmi, bodyFat]
+      `INSERT INTO body_data (user_id, device_name, weight, bmi, body_fat, lean_mass, vo2_max)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [userId, deviceName, weightKg, bmi, bodyFatPct, leanMassKg, vo2Max]
     );
   } finally {
     conn.release();
@@ -132,11 +136,11 @@ async function saveBodyData(userId, deviceName, data) {
 async function saveVitalsData(userId, deviceName, data) {
   const conn = await pool.getConnection();
   try {
-    const { bloodPressureSystolic = null, bloodPressureDiastolic = null, spo2 = null, temperature = null } = data;
+    const { bloodPressureSystolic = null, bloodPressureDiastolic = null, oxygenSaturation = null, temperature = null } = data;
     await conn.execute(
       `INSERT INTO vitals_data (user_id, device_name, bp_systolic, bp_diastolic, spo2, temperature)
        VALUES (?, ?, ?, ?, ?, ?)`,
-      [userId, deviceName, bloodPressureSystolic, bloodPressureDiastolic, spo2, temperature]
+      [userId, deviceName, bloodPressureSystolic, bloodPressureDiastolic, oxygenSaturation, temperature]
     );
   } finally {
     conn.release();
@@ -178,7 +182,7 @@ endpoints.forEach(ep => {
   app.post(`/${ep}`, async (req, res) => {
     const conn = await pool.getConnection();
     try {
-      const userId = req.body.userId || null;
+      const userId = req.body.userId || null; // numeric ID
       const deviceName = req.body.deviceName || 'UnknownDevice';
       const data = req.body.data || req.body;
       const dayLabel = req.body.day || null;
@@ -219,11 +223,9 @@ app.get('/:endpoint/:deviceName', async (req, res) => {
 });
 
 // ----------------- CATCH-ALL ROUTE -----------------
-// Option 2: Express default "any path" pattern
 app.use((req, res) => {
   res.status(404).json({ error: 'Route not found', method: req.method, url: req.originalUrl });
 });
-
 
 // ----------------- START SERVER -----------------
 app.listen(PORT, '0.0.0.0', () => {
