@@ -1,15 +1,16 @@
 require('dotenv').config();
 const express = require('express');
 const mysql = require('mysql2/promise');
-const authRouter = require('./auth'); // your auth.js file
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 
 const app = express();
 app.use(express.json());
 
-// ----------------- CONFIG -----------------
 const PORT = process.env.PORT || 3000;
+const JWT_SECRET = process.env.JWT_SECRET;
 
-// MySQL connection pool
+// ----------------- MySQL connection pool -----------------
 const pool = mysql.createPool({
     host: process.env.DB_HOST,
     user: process.env.DB_USER,
@@ -18,6 +19,56 @@ const pool = mysql.createPool({
     waitForConnections: true,
     connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT) || 10,
     queueLimit: 0
+});
+
+// ----------------- AUTH ROUTES -----------------
+
+// REGISTER
+app.post('/register', async (req, res) => {
+    try {
+        const { fullName, email, password } = req.body;
+        if (!fullName || !email || !password)
+            return res.json({ success: false, message: 'Missing fields' });
+
+        const [existing] = await pool.execute('SELECT id FROM users WHERE email = ?', [email]);
+        if (existing.length > 0)
+            return res.json({ success: false, message: 'Email already registered' });
+
+        const hash = await bcrypt.hash(password, 10);
+        await pool.execute(
+            'INSERT INTO users (full_name, email, password_hash) VALUES (?, ?, ?)',
+            [fullName, email, hash]
+        );
+
+        const userId = '@' + fullName.replace(/\s+/g, '');
+        res.json({ success: true, userId });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Register failed' });
+    }
+});
+
+// LOGIN
+app.post('/login', async (req, res) => {
+    try {
+        const { email, password } = req.body;
+        if (!email || !password)
+            return res.json({ success: false, message: 'Missing fields' });
+
+        const [rows] = await pool.execute('SELECT * FROM users WHERE email = ?', [email]);
+        if (rows.length === 0)
+            return res.json({ success: false, message: 'User not found' });
+
+        const user = rows[0];
+        const match = await bcrypt.compare(password, user.password_hash);
+        if (!match) return res.json({ success: false, message: 'Incorrect password' });
+
+        const userId = '@' + user.full_name.replace(/\s+/g, '');
+        res.json({ success: true, userId });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Login failed' });
+    }
 });
 
 // ----------------- HELPER FUNCTIONS -----------------
@@ -133,7 +184,8 @@ async function saveHealthHistoryData(userId, deviceName, data) {
     }
 }
 
-// ----------------- ENDPOINTS -----------------
+// ----------------- HEALTH ENDPOINTS -----------------
+
 const endpoints = ['activity', 'heart', 'sleep', 'body', 'vitals', 'health', 'health_history'];
 
 endpoints.forEach(ep => {
@@ -147,15 +199,13 @@ endpoints.forEach(ep => {
 
             await saveRawData(userId, deviceName, ep, data, dayLabel);
 
-            switch (ep) {
-                case 'heart': await saveHeartData(userId, deviceName, data); break;
-                case 'sleep': await saveSleepData(userId, deviceName, data); break;
-                case 'activity': await saveActivityData(userId, deviceName, data); break;
-                case 'body': await saveBodyData(userId, deviceName, data); break;
-                case 'vitals': await saveVitalsData(userId, deviceName, data); break;
-                case 'health': await saveHealthData(userId, deviceName, data); break;
-                case 'health_history': await saveHealthHistoryData(userId, deviceName, data); break;
-            }
+            if (ep === 'heart') await saveHeartData(userId, deviceName, data);
+            else if (ep === 'sleep') await saveSleepData(userId, deviceName, data);
+            else if (ep === 'activity') await saveActivityData(userId, deviceName, data);
+            else if (ep === 'body') await saveBodyData(userId, deviceName, data);
+            else if (ep === 'vitals') await saveVitalsData(userId, deviceName, data);
+            else if (ep === 'health') await saveHealthData(userId, deviceName, data);
+            else if (ep === 'health_history') await saveHealthHistoryData(userId, deviceName, data);
 
             res.json({ success: true, endpoint: ep });
         } catch (err) {
@@ -167,7 +217,7 @@ endpoints.forEach(ep => {
     });
 });
 
-// GET raw logs
+// GET endpoint for raw logs
 app.get('/:endpoint/:deviceName', async (req, res) => {
     try {
         const { endpoint, deviceName } = req.params;
@@ -181,9 +231,6 @@ app.get('/:endpoint/:deviceName', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
-
-// ----------------- MOUNT AUTH -----------------
-app.use('/', authRouter); // /register and /login
 
 // ----------------- START SERVER -----------------
 app.listen(PORT, () => console.log(`✅ API running on port ${PORT}`));
