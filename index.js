@@ -79,7 +79,6 @@ async function saveRawData(userId, deviceName, endpoint, data, dayLabel = null) 
   }
 }
 
-// Other save functions (heart, sleep, activity, body, vitals, health, health_history)
 async function saveHeartData(userId, deviceName, data) {
   const conn = await pool.getConnection();
   try {
@@ -207,27 +206,11 @@ endpoints.forEach(ep => {
   });
 });
 
-// ----------------- GET RAW DATA -----------------
-app.get('/:endpoint/:deviceName', async (req, res) => {
-  try {
-    const { endpoint, deviceName } = req.params;
-    const [rows] = await pool.execute(
-      `SELECT * FROM device_data WHERE device_name=? AND endpoint=? ORDER BY created_at DESC`,
-      [deviceName, endpoint]
-    );
-    res.json(rows);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // ----------------- INSIGHTS -----------------
 app.get('/insights/:userId', async (req, res) => {
   try {
     const userId = req.params.userId;
 
-    // Fetch latest data per category
     const [activityRows] = await pool.execute(
       `SELECT * FROM activity_data WHERE user_id=? ORDER BY created_at DESC LIMIT 1`, [userId]
     );
@@ -247,7 +230,6 @@ app.get('/insights/:userId', async (req, res) => {
       `SELECT * FROM health_data WHERE user_id=? ORDER BY created_at DESC LIMIT 1`, [userId]
     );
 
-    // Map DB columns to consistent keys, fallback to empty objects if missing
     const insights = {
       activity: activityRows[0] ? {
         steps: activityRows[0].steps,
@@ -286,19 +268,31 @@ app.get('/insights/:userId', async (req, res) => {
       } : {}
     };
 
-    // Health summary (example ranges)
     const summary = {};
     if (insights.activity.steps) summary.averageSteps = insights.activity.steps;
     if (insights.heart.restingHeartRate) summary.averageHR = insights.heart.restingHeartRate;
     if (insights.sleep.sleepHours) summary.averageSleep = insights.sleep.sleepHours;
-
-    // Simple health score: 0-100
-    summary.healthScore = 50; // placeholder, you can add formula comparing to healthy ranges
+    summary.healthScore = 50;
 
     res.json({ success: true, insights, summary });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ----------------- GET RAW DATA (NAMESPACED) -----------------
+app.get('/raw/:endpoint/:deviceName', async (req, res) => {
+  try {
+    const { endpoint, deviceName } = req.params;
+    const [rows] = await pool.execute(
+      `SELECT * FROM device_data WHERE device_name=? AND endpoint=? ORDER BY created_at DESC`,
+      [deviceName, endpoint]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
   }
 });
 
