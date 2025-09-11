@@ -37,7 +37,8 @@ app.post('/register', async (req, res) => {
     );
 
     const userId = result.insertId.toString();
-    res.json({ success: true, message: "Registered successfully", userId });
+    const handle = `@${fullName}`;
+    res.json({ success: true, message: "Registered successfully", userId, handle });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: 'Register failed' });
@@ -58,7 +59,8 @@ app.post('/login', async (req, res) => {
     if (!match) return res.json({ success: false, message: 'Incorrect password' });
 
     const userId = user.id.toString();
-    res.json({ success: true, message: "Login successful", userId });
+    const handle = `@${user.full_name}`;
+    res.json({ success: true, message: "Login successful", userId, handle });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: 'Login failed' });
@@ -206,98 +208,370 @@ endpoints.forEach(ep => {
   });
 });
 
-// ----------------- INSIGHTS -----------------
+// ----------------- ENHANCED INSIGHTS ENDPOINT -----------------
 app.get('/insights/:userId', async (req, res) => {
   try {
     const userId = req.params.userId;
 
-    const [activityRows] = await pool.execute(
-      `SELECT * FROM activity_data WHERE user_id=? ORDER BY created_at DESC LIMIT 1`, [userId]
+    // Get last 30 days of data for trend analysis
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    // Fetch comprehensive data with historical context
+    const [activityData] = await pool.execute(
+      `SELECT * FROM activity_data WHERE user_id=? AND created_at >= ? ORDER BY created_at DESC`, 
+      [userId, thirtyDaysAgo]
     );
-    const [heartRows] = await pool.execute(
-      `SELECT * FROM heart_data WHERE user_id=? ORDER BY created_at DESC LIMIT 1`, [userId]
+    
+    const [heartData] = await pool.execute(
+      `SELECT * FROM heart_data WHERE user_id=? AND created_at >= ? ORDER BY created_at DESC`, 
+      [userId, thirtyDaysAgo]
     );
-    const [sleepRows] = await pool.execute(
-      `SELECT * FROM sleep_data WHERE user_id=? ORDER BY created_at DESC LIMIT 1`, [userId]
+    
+    const [sleepData] = await pool.execute(
+      `SELECT * FROM sleep_data WHERE user_id=? AND created_at >= ? ORDER BY created_at DESC`, 
+      [userId, thirtyDaysAgo]
     );
 
-    const insights = {
-      activity: activityRows[0] ? {
-        steps: activityRows[0].steps,
-        calories: activityRows[0].calories,
-        distance: activityRows[0].distance,
-        exerciseMinutes: activityRows[0].exercise_minutes
-      } : {},
-      heart: heartRows[0] ? {
-        currentHeartRate: heartRows[0].current_heart_rate,
-        restingHeartRate: heartRows[0].resting_heart_rate,
-        hrv: heartRows[0].hrv
-      } : {},
-      sleep: sleepRows[0] ? {
-        totalSleep: sleepRows[0].total_sleep,
-        deepSleep: sleepRows[0].deep_sleep,
-        remSleep: sleepRows[0].rem_sleep,
-        sleepHours: sleepRows[0].sleep_hours
-      } : {}
-    };
+    const [bodyData] = await pool.execute(
+      `SELECT * FROM body_data WHERE user_id=? AND created_at >= ? ORDER BY created_at DESC`, 
+      [userId, thirtyDaysAgo]
+    );
 
-    // ----------- SMART SUMMARY + WEIGHTED SCORE -----------
-    const summary = {};
-    const breakdown = {};
+    const [vitalsData] = await pool.execute(
+      `SELECT * FROM vitals_data WHERE user_id=? AND created_at >= ? ORDER BY created_at DESC`, 
+      [userId, thirtyDaysAgo]
+    );
 
-    // Activity Score (40%)
-    let stepsScore = 0;
-    if (insights.activity.steps) {
-      stepsScore = Math.min(100, (insights.activity.steps / 10000) * 100);
-      summary.averageSteps = insights.activity.steps;
-      breakdown.stepsScore = Math.round(stepsScore);
-    }
+    // Get last 7 days for weekly analysis
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-    // Heart Score (30%)
-    let heartScore = 0;
-    if (insights.heart.restingHeartRate) {
-      const rhr = insights.heart.restingHeartRate;
-      if (rhr >= 50 && rhr <= 70) heartScore = 100;
-      else if (rhr > 70 && rhr <= 90) heartScore = 70;
-      else if (rhr < 50 && rhr >= 40) heartScore = 80;
-      else heartScore = 50;
-      summary.averageHR = rhr;
-      breakdown.heartScore = heartScore;
-    }
+    const [weeklyActivity] = await pool.execute(
+      `SELECT * FROM activity_data WHERE user_id=? AND created_at >= ? ORDER BY created_at DESC`, 
+      [userId, sevenDaysAgo]
+    );
 
-    // Sleep Score (30%)
-    let sleepScore = 0;
-    if (insights.sleep.sleepHours) {
-      const hours = insights.sleep.sleepHours;
-      if (hours >= 7 && hours <= 9) sleepScore = 100;
-      else if (hours >= 6 && hours < 7) sleepScore = 80;
-      else if (hours > 9 && hours <= 10) sleepScore = 80;
-      else sleepScore = 50;
-      summary.averageSleep = hours;
-      breakdown.sleepScore = sleepScore;
-    }
+    const [weeklySleep] = await pool.execute(
+      `SELECT * FROM sleep_data WHERE user_id=? AND created_at >= ? ORDER BY created_at DESC`, 
+      [userId, sevenDaysAgo]
+    );
 
-    // Weighted final score
-    const weights = { steps: 0.4, heart: 0.3, sleep: 0.3 };
-    const totalWeight = [
-      stepsScore ? weights.steps : 0,
-      heartScore ? weights.heart : 0,
-      sleepScore ? weights.sleep : 0
-    ].reduce((a, b) => a + b, 0);
+    const [weeklyHeart] = await pool.execute(
+      `SELECT * FROM heart_data WHERE user_id=? AND created_at >= ? ORDER BY created_at DESC`, 
+      [userId, sevenDaysAgo]
+    );
 
-    const weightedScore = totalWeight > 0
-      ? Math.round(((stepsScore * weights.steps) + (heartScore * weights.heart) + (sleepScore * weights.sleep)) / totalWeight)
-      : 50;
+    // Calculate comprehensive insights
+    const insights = calculateComprehensiveInsights({
+      activity: activityData,
+      heart: heartData,
+      sleep: sleepData,
+      body: bodyData,
+      vitals: vitalsData,
+      weeklyActivity,
+      weeklySleep,
+      weeklyHeart
+    });
 
-    summary.healthScore = weightedScore;
-    summary.breakdown = breakdown;
-
-    res.json({ success: true, insights, summary });
+    res.json({ success: true, insights });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
+// Helper function for comprehensive analysis
+function calculateComprehensiveInsights(data) {
+  const insights = {
+    currentMetrics: {},
+    trends: {},
+    healthScore: 0,
+    recommendations: [],
+    alerts: [],
+    weeklyAverages: {},
+    monthlyProgress: {}
+  };
+
+  // ========== ACTIVITY ANALYSIS ==========
+  if (data.activity.length > 0) {
+    const latestActivity = data.activity[0];
+    const weeklySteps = data.weeklyActivity.map(d => d.steps || 0);
+    const monthlySteps = data.activity.map(d => d.steps || 0);
+
+    insights.currentMetrics.steps = latestActivity.steps || 0;
+    insights.currentMetrics.calories = latestActivity.calories || 0;
+    insights.currentMetrics.distance = latestActivity.distance || 0;
+    insights.currentMetrics.exerciseMinutes = latestActivity.exercise_minutes || 0;
+
+    // Weekly averages
+    insights.weeklyAverages.steps = Math.round(weeklySteps.reduce((a, b) => a + b, 0) / weeklySteps.length);
+    insights.weeklyAverages.calories = Math.round(data.weeklyActivity.reduce((sum, d) => sum + (d.calories || 0), 0) / data.weeklyActivity.length);
+
+    // Trend analysis
+    const recentSteps = weeklySteps.slice(0, 3);
+    const olderSteps = weeklySteps.slice(3, 6);
+    
+    if (recentSteps.length > 0 && olderSteps.length > 0) {
+      const recentAvg = recentSteps.reduce((a, b) => a + b, 0) / recentSteps.length;
+      const olderAvg = olderSteps.reduce((a, b) => a + b, 0) / olderSteps.length;
+      insights.trends.steps = ((recentAvg - olderAvg) / olderAvg * 100).toFixed(1);
+    }
+
+    // Activity recommendations
+    if (insights.currentMetrics.steps < 5000) {
+      insights.recommendations.push({
+        category: "activity",
+        priority: "high",
+        title: "Increase Daily Movement",
+        message: "Your step count is below recommended levels. Try taking short walks throughout the day."
+      });
+    } else if (insights.currentMetrics.steps >= 10000) {
+      insights.recommendations.push({
+        category: "activity",
+        priority: "positive",
+        title: "Excellent Activity Level",
+        message: "You're consistently meeting your daily step goals. Keep up the great work!"
+      });
+    }
+  }
+
+  // ========== HEART RATE ANALYSIS ==========
+  if (data.heart.length > 0) {
+    const latestHeart = data.heart[0];
+    const weeklyHR = data.weeklyHeart.map(d => d.resting_heart_rate || 0).filter(hr => hr > 0);
+    
+    insights.currentMetrics.currentHeartRate = latestHeart.current_heart_rate || 0;
+    insights.currentMetrics.restingHeartRate = latestHeart.resting_heart_rate || 0;
+    insights.currentMetrics.hrv = latestHeart.hrv || 0;
+
+    if (weeklyHR.length > 0) {
+      insights.weeklyAverages.restingHeartRate = Math.round(weeklyHR.reduce((a, b) => a + b, 0) / weeklyHR.length);
+
+      // Heart rate trend
+      const recentHR = weeklyHR.slice(0, 3);
+      const olderHR = weeklyHR.slice(3, 6);
+      
+      if (recentHR.length > 0 && olderHR.length > 0) {
+        const recentAvg = recentHR.reduce((a, b) => a + b, 0) / recentHR.length;
+        const olderAvg = olderHR.reduce((a, b) => a + b, 0) / olderHR.length;
+        insights.trends.heartRate = ((recentAvg - olderAvg) / olderAvg * 100).toFixed(1);
+      }
+    }
+
+    // Heart rate analysis
+    const rhr = insights.currentMetrics.restingHeartRate;
+    if (rhr > 100) {
+      insights.alerts.push({
+        type: "warning",
+        category: "heart",
+        message: "Elevated resting heart rate detected. Consider stress management techniques."
+      });
+    } else if (rhr >= 50 && rhr <= 70) {
+      insights.recommendations.push({
+        category: "heart",
+        priority: "positive",
+        title: "Optimal Heart Health",
+        message: "Your resting heart rate indicates excellent cardiovascular fitness."
+      });
+    }
+  }
+
+  // ========== SLEEP ANALYSIS ==========
+  if (data.sleep.length > 0) {
+    const latestSleep = data.sleep[0];
+    const weeklySleepHours = data.weeklySleep.map(d => d.sleep_hours || 0).filter(h => h > 0);
+    
+    insights.currentMetrics.sleepHours = latestSleep.sleep_hours || 0;
+    insights.currentMetrics.deepSleep = latestSleep.deep_sleep || 0;
+    insights.currentMetrics.remSleep = latestSleep.rem_sleep || 0;
+
+    if (weeklySleepHours.length > 0) {
+      insights.weeklyAverages.sleepHours = (weeklySleepHours.reduce((a, b) => a + b, 0) / weeklySleepHours.length).toFixed(1);
+
+      // Sleep trend
+      const recentSleep = weeklySleepHours.slice(0, 3);
+      const olderSleep = weeklySleepHours.slice(3, 6);
+      
+      if (recentSleep.length > 0 && olderSleep.length > 0) {
+        const recentAvg = recentSleep.reduce((a, b) => a + b, 0) / recentSleep.length;
+        const olderAvg = olderSleep.reduce((a, b) => a + b, 0) / olderSleep.length;
+        insights.trends.sleep = ((recentAvg - olderAvg) / olderAvg * 100).toFixed(1);
+      }
+    }
+
+    // Sleep recommendations
+    const sleepHours = insights.currentMetrics.sleepHours;
+    if (sleepHours < 6) {
+      insights.alerts.push({
+        type: "warning",
+        category: "sleep",
+        message: "Insufficient sleep detected. Aim for 7-9 hours per night for optimal health."
+      });
+    } else if (sleepHours >= 7 && sleepHours <= 9) {
+      insights.recommendations.push({
+        category: "sleep",
+        priority: "positive",
+        title: "Optimal Sleep Duration",
+        message: "Your sleep duration is in the ideal range for recovery and health."
+      });
+    }
+  }
+
+  // ========== BODY METRICS ANALYSIS ==========
+  if (data.body.length > 0) {
+    const latestBody = data.body[0];
+    const monthlyWeight = data.body.map(d => d.weight || 0).filter(w => w > 0);
+    
+    insights.currentMetrics.weightKg = latestBody.weight || 0;
+    insights.currentMetrics.bmi = latestBody.bmi || 0;
+    insights.currentMetrics.bodyFat = latestBody.body_fat || 0;
+    insights.currentMetrics.vo2Max = latestBody.vo2_max || 0;
+
+    // Weight trend analysis
+    if (monthlyWeight.length >= 2) {
+      const recentWeight = monthlyWeight.slice(0, 5);
+      const olderWeight = monthlyWeight.slice(5, 10);
+      
+      if (recentWeight.length > 0 && olderWeight.length > 0) {
+        const recentAvg = recentWeight.reduce((a, b) => a + b, 0) / recentWeight.length;
+        const olderAvg = olderWeight.reduce((a, b) => a + b, 0) / olderWeight.length;
+        insights.trends.weight = ((recentAvg - olderAvg) / olderAvg * 100).toFixed(1);
+      }
+    }
+
+    // BMI analysis
+    const bmi = insights.currentMetrics.bmi;
+    if (bmi > 0) {
+      if (bmi >= 18.5 && bmi < 25) {
+        insights.recommendations.push({
+          category: "body",
+          priority: "positive",
+          title: "Healthy BMI Range",
+          message: "Your BMI indicates a healthy weight range."
+        });
+      } else if (bmi >= 25) {
+        insights.recommendations.push({
+          category: "body",
+          priority: "medium",
+          title: "Weight Management",
+          message: "Consider focusing on balanced nutrition and regular exercise."
+        });
+      }
+    }
+  }
+
+  // ========== VITALS ANALYSIS ==========
+  if (data.vitals.length > 0) {
+    const latestVitals = data.vitals[0];
+    
+    insights.currentMetrics.oxygenSaturation = latestVitals.spo2 || 0;
+    insights.currentMetrics.bloodPressureSystolic = latestVitals.bp_systolic || 0;
+    insights.currentMetrics.bloodPressureDiastolic = latestVitals.bp_diastolic || 0;
+    insights.currentMetrics.temperature = latestVitals.temperature || 0;
+
+    // Oxygen saturation analysis
+    const spo2 = insights.currentMetrics.oxygenSaturation;
+    if (spo2 < 90 && spo2 > 0) {
+      insights.alerts.push({
+        type: "critical",
+        category: "vitals",
+        message: "Low blood oxygen detected. Consider consulting a healthcare provider."
+      });
+    } else if (spo2 >= 95) {
+      insights.recommendations.push({
+        category: "vitals",
+        priority: "positive",
+        title: "Excellent Oxygen Levels",
+        message: "Your blood oxygen saturation is in the optimal range."
+      });
+    }
+
+    // Blood pressure analysis
+    const systolic = insights.currentMetrics.bloodPressureSystolic;
+    const diastolic = insights.currentMetrics.bloodPressureDiastolic;
+    
+    if (systolic > 140 || diastolic > 90) {
+      insights.alerts.push({
+        type: "warning",
+        category: "vitals",
+        message: "Elevated blood pressure detected. Monitor regularly and consult healthcare provider."
+      });
+    }
+  }
+
+  // ========== CALCULATE OVERALL HEALTH SCORE ==========
+  let totalScore = 0;
+  let scoreComponents = 0;
+
+  // Steps score (25%)
+  if (insights.currentMetrics.steps > 0) {
+    const stepsScore = Math.min(100, (insights.currentMetrics.steps / 10000) * 100);
+    totalScore += stepsScore * 0.25;
+    scoreComponents += 0.25;
+  }
+
+  // Heart rate score (25%)
+  if (insights.currentMetrics.restingHeartRate > 0) {
+    const rhr = insights.currentMetrics.restingHeartRate;
+    let heartScore = 50;
+    if (rhr >= 50 && rhr <= 70) heartScore = 100;
+    else if (rhr > 70 && rhr <= 90) heartScore = 75;
+    else if (rhr < 50 && rhr >= 40) heartScore = 85;
+    
+    totalScore += heartScore * 0.25;
+    scoreComponents += 0.25;
+  }
+
+  // Sleep score (25%)
+  if (insights.currentMetrics.sleepHours > 0) {
+    const hours = insights.currentMetrics.sleepHours;
+    let sleepScore = 50;
+    if (hours >= 7 && hours <= 9) sleepScore = 100;
+    else if (hours >= 6 && hours < 7) sleepScore = 80;
+    else if (hours > 9 && hours <= 10) sleepScore = 85;
+    
+    totalScore += sleepScore * 0.25;
+    scoreComponents += 0.25;
+  }
+
+  // Vitals score (25%)
+  if (insights.currentMetrics.oxygenSaturation > 0) {
+    const spo2 = insights.currentMetrics.oxygenSaturation;
+    let vitalsScore = 50;
+    if (spo2 >= 95) vitalsScore = 100;
+    else if (spo2 >= 90) vitalsScore = 75;
+    
+    totalScore += vitalsScore * 0.25;
+    scoreComponents += 0.25;
+  }
+
+  insights.healthScore = scoreComponents > 0 ? Math.round(totalScore / scoreComponents) : 0;
+
+  // ========== GENERATE WEEKLY SUMMARY ==========
+  insights.weeklySummary = {
+    totalSteps: data.weeklyActivity.reduce((sum, d) => sum + (d.steps || 0), 0),
+    avgSleepHours: insights.weeklyAverages.sleepHours || 0,
+    workoutsCompleted: data.weeklyActivity.filter(d => (d.exercise_minutes || 0) > 30).length,
+    healthScoreTrend: calculateHealthScoreTrend(data)
+  };
+
+  return insights;
+}
+
+// Helper function to calculate health score trend
+function calculateHealthScoreTrend(data) {
+  // Simple implementation - you can make this more sophisticated
+  const hasPositiveTrends = [
+    data.weeklyActivity.length > 3,
+    data.weeklySleep.length > 3,
+    data.weeklyHeart.length > 3
+  ].filter(Boolean).length;
+
+  if (hasPositiveTrends >= 2) return "improving";
+  else if (hasPositiveTrends === 1) return "stable";
+  else return "needs_attention";
+}
 
 // ----------------- GET RAW DATA -----------------
 app.get('/raw/:endpoint/:deviceName', async (req, res) => {
