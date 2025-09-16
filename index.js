@@ -5,6 +5,8 @@ const mysql = require('mysql2/promise');
 const bcrypt = require('bcrypt');
 
 const app = express();
+// --- SETUP MIDDLEWARE ---
+app.use(cors()); // <-- 2. USE THE CORS MIDDLEWARE HERE
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
